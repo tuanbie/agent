@@ -46,18 +46,53 @@ Các endpoint khác:
 
 - `POST /reset` — xoá hội thoại, bắt đầu phiên mới
 - `POST /interrupt` — dừng tác vụ agent đang chạy dở
-- `GET /health` — kiểm tra trạng thái, model, workspace đang dùng
+- `GET /health` — kiểm tra trạng thái, model, workspace đang dùng (không cần token)
+
+## Connect từ xa (CLI)
+
+Để code từ một máy/thiết bị khác qua CLI thay vì `curl`:
+
+1. **Bật xác thực** trước khi mở ra ngoài `127.0.0.1` — bắt buộc, không có bước
+   này thì bất kỳ ai nối được tới port đều có thể đọc/ghi file + chạy lệnh shell
+   trên máy bạn:
+   ```powershell
+   $env:AGENT_TOKEN = "một-chuỗi-bí-mật-tự-đặt"
+   uvicorn main:app --host 0.0.0.0 --port 8787
+   ```
+2. **Mở firewall** cho port đó (chỉ cần nếu client ở máy khác trong cùng LAN):
+   ```powershell
+   New-NetFirewallRule -DisplayName "coding-agent-server" -Direction Inbound -Protocol TCP -LocalPort 8787 -Action Allow
+   ```
+3. **Từ máy client**, chạy CLI đi kèm (`cli.py`), trỏ tới IP LAN của máy server:
+   ```powershell
+   $env:AGENT_URL = "http://<IP-máy-server>:8787"
+   $env:AGENT_TOKEN = "cùng chuỗi bí mật ở bước 1"
+   python cli.py
+   ```
+   Gõ thẳng tin nhắn ở prompt `you>` để agent code trên máy server; `/reset` để
+   xoá hội thoại.
+
+Nếu client ở **ngoài Internet** (không cùng LAN), không port-forward thẳng ra
+ngoài — dùng một mạng riêng như Tailscale/ZeroTier để nối hai máy, rồi trỏ
+`AGENT_URL` vào IP nội bộ do nó cấp.
 
 ## Giới hạn / lưu ý bảo mật
 
-- Server này **chỉ nên bind `127.0.0.1`**, không expose ra mạng — agent có toàn
-  quyền đọc/ghi file và chạy lệnh shell trong `WORKSPACE_ROOT`.
+- Nếu không set `AGENT_TOKEN`, server không xác thực request nào cả — chỉ chấp
+  nhận khi vẫn bind `127.0.0.1`. Một khi bind `0.0.0.0` (cho remote), **luôn**
+  set `AGENT_TOKEN`.
+- Agent có toàn quyền đọc/ghi file và chạy lệnh shell trong `WORKSPACE_ROOT` —
+  coi token như một mật khẩu root, đừng commit nó vào git.
 - Một tiến trình server = một hội thoại/agent duy nhất (không tách theo
   session_id). Muốn nhiều workspace song song thì chạy nhiều instance ở port
   khác nhau, mỗi cái set `WORKSPACE_ROOT` riêng.
 - `permission_mode="acceptEdits"` nghĩa là sửa file được tự động chấp nhận,
   không có người duyệt từng edit — vì server chạy không tương tác. Nếu muốn
   chặt hơn, đổi giá trị này hoặc thêm `allowed_tools` trong `main.py`.
+- Claude là model đóng của Anthropic — server này (và bất kỳ cách dùng Claude
+  nào khác) luôn cần gọi ra Internet tới Anthropic để suy nghĩ/sinh code. Phần
+  "chạy trên máy bạn" chỉ là tác vụ file/bash/orchestration, không phải
+  inference.
 
 ## Tham khảo mã nguồn mở khác
 

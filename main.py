@@ -5,10 +5,11 @@ CLI — file edits, bash, search, etc.) behind a tiny FastAPI server so other
 local tools/scripts can talk to it over HTTP.
 """
 
+import hmac
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from claude_agent_sdk import (
@@ -20,6 +21,16 @@ from claude_agent_sdk import (
 
 WORKSPACE = os.environ.get("WORKSPACE_ROOT", os.getcwd())
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-4-8")
+AGENT_TOKEN = os.environ.get("AGENT_TOKEN")  # required once the server is reachable off 127.0.0.1
+
+
+async def require_token(authorization: str | None = Header(default=None)) -> None:
+    if AGENT_TOKEN is None:
+        # No token configured — only acceptable while bound to 127.0.0.1.
+        return
+    expected = f"Bearer {AGENT_TOKEN}"
+    if authorization is None or not hmac.compare_digest(authorization, expected):
+        raise HTTPException(status_code=401, detail="missing or invalid token")
 
 OPTIONS = ClaudeAgentOptions(
     cwd=WORKSPACE,
@@ -61,7 +72,7 @@ class ChatResponse(BaseModel):
     response: str
 
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post("/chat", response_model=ChatResponse, dependencies=[Depends(require_token)])
 async def chat(req: ChatRequest) -> ChatResponse:
     assert client is not None
     await client.query(req.message)
@@ -76,7 +87,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
     return ChatResponse(response="".join(parts))
 
 
-@app.post("/reset")
+@app.post("/reset", dependencies=[Depends(require_token)])
 async def reset() -> dict:
     global client
     assert client is not None
@@ -86,7 +97,7 @@ async def reset() -> dict:
     return {"ok": True}
 
 
-@app.post("/interrupt")
+@app.post("/interrupt", dependencies=[Depends(require_token)])
 async def interrupt() -> dict:
     assert client is not None
     await client.interrupt()
